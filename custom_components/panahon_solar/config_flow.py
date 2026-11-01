@@ -39,7 +39,7 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
-        return PanahonSolarOptionsFlowHandler(config_entry)
+        return PanahonSolarOptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -88,16 +88,21 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Handle reconfiguring the existing config entry."""
-        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if hasattr(self, "_get_reconfigure_entry"):
+            entry = self._get_reconfigure_entry()
+        else:
+            entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
         if entry is None:
             return self.async_abort(reason="reconfigure_failed")
 
         if user_input is not None:
-            return self.async_update_reload_and_abort(
-                entry,
-                data={**entry.data, **user_input},
-                reason="reconfigure_successful",
-            )
+            if hasattr(self, "async_update_reload_and_abort"):
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates=user_input,
+                )
+            return self.async_abort(reason="reconfigure_successful")
 
         current = {**entry.data, **entry.options}
         schema = vol.Schema(
@@ -117,9 +122,6 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class PanahonSolarOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for live reconfiguring via Configure button."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
