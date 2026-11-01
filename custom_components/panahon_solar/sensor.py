@@ -197,8 +197,14 @@ class PanahonSolarSensor(
         attrs: dict[str, Any] = {
             "data_source": data.get("data_source"),
         }
-        if data.get("pagasa_barangay"):
-            attrs["pagasa_location"] = f"{data.get('pagasa_barangay')}, {data.get('pagasa_municipality')}, {data.get('pagasa_province')}"
+        if data.get("pagasa_municipality"):
+            loc_parts = [
+                data.get("pagasa_barangay"),
+                data.get("pagasa_municipality"),
+                data.get("pagasa_province"),
+                data.get("pagasa_region"),
+            ]
+            attrs["pagasa_location"] = ", ".join([str(p) for p in loc_parts if p])
 
         if self.entity_description.key == "heat_index_avg":
             attrs.update(

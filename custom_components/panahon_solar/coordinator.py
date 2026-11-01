@@ -122,7 +122,7 @@ class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         is_direct_panahon = False
 
         # 1. Fetch Official DOST-PAGASA PANaHON Nowcast Dashboard
-        dashboard_url = f"{PANAHON_BASE_URL}/nowcast/dashboard?latitude={lat}&longitude={lon}"
+        dashboard_url = f"{PANAHON_BASE_URL}/nowcast/dashboard?lat={lat}&lon={lon}"
         headers = {
             "Accept": "application/json",
             "User-Agent": "PANaHON/1.1.3 (DOST-PAGASA)",
