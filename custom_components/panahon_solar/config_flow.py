@@ -134,6 +134,8 @@ class PanahonSolarOptionsFlowHandler(config_entries.OptionsFlow):
         current = {**entry.data, **entry.options}
         schema = vol.Schema(
             {
+                vol.Required(CONF_LATITUDE, default=current.get(CONF_LATITUDE, 14.5995)): vol.Coerce(float),
+                vol.Required(CONF_LONGITUDE, default=current.get(CONF_LONGITUDE, 120.9842)): vol.Coerce(float),
                 vol.Required(CONF_ARRAY_KWP, default=current.get(CONF_ARRAY_KWP, DEFAULT_ARRAY_KWP)): vol.Coerce(float),
                 vol.Required(CONF_PANEL_TILT, default=current.get(CONF_PANEL_TILT, DEFAULT_PANEL_TILT)): vol.Coerce(float),
                 vol.Required(CONF_PANEL_AZIMUTH, default=current.get(CONF_PANEL_AZIMUTH, DEFAULT_PANEL_AZIMUTH)): vol.Coerce(float),

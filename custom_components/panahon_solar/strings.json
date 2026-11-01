@@ -45,8 +45,10 @@
     "step": {
       "init": {
         "title": "Solar Forecast Options",
-        "description": "Fine-tune your solar array specifications, roof angles, or station tokens anytime without re-adding the integration.",
+        "description": "Fine-tune your location coordinates, solar array specifications, roof angles, or station tokens anytime without re-adding the integration.",
         "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude",
           "array_kwp": "Solar Array Capacity (kWp)",
           "panel_tilt": "Panel Tilt (Degrees)",
           "panel_azimuth": "Panel Azimuth (0° = South)",
