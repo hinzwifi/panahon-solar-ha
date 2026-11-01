@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "DOST-PAGASA PANaHON & PH Solar Setup",
+        "description": "Configure your Philippine coordinates, solar PV array kWp, and optional PANaHON mobile device credentials.",
+        "data": {
+          "name": "Integration Name",
+          "latitude": "Philippine Latitude",
+          "longitude": "Philippine Longitude",
+          "array_kwp": "Solar PV Array Size (kWp)",
+          "panel_tilt": "Roof Panel Tilt (Degrees, e.g. 14° for PH)",
+          "panel_azimuth": "Panel Azimuth (0° = South)",
+          "system_efficiency": "Inverter & Wiring Efficiency (0.82 = 82%)",
+          "panahon_device_id": "Optional PANaHON X-Device-Id",
+          "panahon_access_token": "Optional PANaHON Bearer Access Token"
+        }
+      }
+    }
+  }
+}

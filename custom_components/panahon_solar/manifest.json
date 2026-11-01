@@ -1,0 +1,10 @@
+{
+  "domain": "panahon_solar",
+  "name": "DOST-PAGASA PANaHON & PH Solar Forecast",
+  "codeowners": ["@hinzwifi"],
+  "config_flow": true,
+  "documentation": "https://bagong.pagasa.dost.gov.ph",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "1.1.3"
+}

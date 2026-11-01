@@ -1,0 +1,578 @@
+# ==============================================================================
+# HAYNES SOLAR-THERMAL AI & WEATHER-ADAPTIVE 50% MORNING RESERVE ENGINE
+# Upgraded with DOST-PAGASA PANaHON & ECMWF Solar Irradiance Integration
+# ==============================================================================
+
+template:
+  - binary_sensor:
+      - name: "Dumb 7kW EV Charger Detected"
+        unique_id: dumb_7kw_ev_charger_detected
+        icon: mdi:car-electric
+        delay_on: "00:00:45"
+        delay_off: "00:01:30"
+        state: >
+          {% set backup_load = states('sensor.solis_s6_eh1p_backup_load_power') | float(0) %}
+          {% set grid_port_load = states('sensor.ac_grid_port_positive_power') | float(0) %}
+          {% set total_load = [backup_load, grid_port_load, (backup_load + grid_port_load)] | max %}
+          {{ total_load >= 6500 }}
+
+      - name: "Inverter 12kW Redline Alert"
+        unique_id: inverter_12kw_redline_alert
+        icon: mdi:flash-alert
+        device_class: problem
+        delay_on: "00:00:05"
+        delay_off: "00:03:00"
+        state: >
+          {% set backup_load = states('sensor.solis_s6_eh1p_backup_load_power') | float(0) %}
+          {% set grid_port_load = states('sensor.ac_grid_port_positive_power') | float(0) %}
+          {% set inv_temp = states('sensor.solis_s6_eh1p_temperature') | float(0) %}
+          {{ (backup_load + grid_port_load) >= 10600 or backup_load >= 10600 or inv_temp >= 65 }}
+
+      - name: "PANaHON Solar Storm or Typhoon Guard Active"
+        unique_id: panahon_solar_storm_guard_active
+        icon: mdi:weather-hurricane
+        device_class: safety
+        state: >
+          {% set adv = states('sensor.panahon_solar_and_typhoon_battery_advisory') | default('') %}
+          {% set rain = states('sensor.panahon_1h_rainfall') | float(0) %}
+          {% set wind = states('sensor.panahon_wind_speed') | float(0) %}
+          {{ ('Backup' in adv) or ('Typhoon' in adv) or (rain >= 15.0) or (wind >= 50.0) }}
+
+  - sensor:
+      - name: "Dynamic Precool Target Temp"
+        unique_id: dynamic_precool_target_temp
+        unit_of_measurement: "°C"
+        icon: mdi:thermometer-auto
+        state: >
+          {% set wx = states('weather.panahon_ph_forecast') | lower %}
+          {% if wx in ['unavailable', 'unknown', ''] %}
+            {% set wx = states('weather.forecast_home') | lower %}
+          {% endif %}
+          {% set heat_index = states('sensor.panahon_pagasa_heat_index') | float(0) %}
+          {% set wx_temp = states('sensor.panahon_air_temperature') | float(0) %}
+          {% if wx_temp <= 0 %}
+            {% set wx_temp = state_attr('weather.forecast_home', 'temperature') | float(0) %}
+          {% endif %}
+          {% set ext_green = states('sensor.green_room_ac_external_unit_temperature') | float(0) %}
+          {% set ext_guest = states('sensor.guest_room_ac_external_unit_temperature') | float(0) %}
+          {% set outdoor_temp = [wx_temp, ext_green, ext_guest] | max %}
+          {% set pv = states('sensor.solis_s6_eh1p_total_pv_power') | float(0) %}
+          {% set gti = states('sensor.panahon_roof_tilted_irradiance_gti') | float(0) %}
+          {% set storm_guard = is_state('binary_sensor.panahon_solar_storm_or_typhoon_guard_active', 'on') %}
+
+          {# 1. If Monsoon / Storm Guard active, preserve inverter & battery reserve #}
+          {% if storm_guard or wx in ['rainy', 'pouring', 'lightning', 'lightning-rainy', 'fog', 'hail'] or (outdoor_temp > 0 and outdoor_temp < 28) %}
+            22
+          {# 2. Extreme PAGASA Heat Index (>= 40°C Danger) or Blazing Irradiance (GTI >= 700 W/m² and PV >= 4500W) #}
+          {% elif (heat_index >= 40.0 and pv >= 4500) or (pv >= 5000 and (gti >= 700 or outdoor_temp >= 33)) %}
+            19
+          {# 3. Strong Sun Sponge: High GTI or Hot Outdoor with steady solar generation #}
+          {% elif (heat_index >= 35.0 and pv >= 4200) or (pv >= 4200 and outdoor_temp >= 30) or (gti >= 550 and pv >= 4000) %}
+            20
+          {% else %}
+            21
+          {% endif %}
+
+      - name: "Projected 6AM Battery SOC"
+        unique_id: projected_6am_battery_soc
+        unit_of_measurement: "%"
+        icon: mdi:battery-clock
+        state: >
+          {% set soc = states('sensor.solis_s6_eh1p_battery_soc') | float(50) %}
+          {% set discharge_w = states('sensor.solis_s6_eh1p_battery_discharge_power') | float(0) %}
+          {% set hr = now().hour + (now().minute / 60.0) %}
+          {% if hr >= 17.0 %}
+            {% set hours_left = (24.0 - hr) + 6.0 %}
+          {% elif hr < 6.0 %}
+            {% set hours_left = 6.0 - hr %}
+          {% else %}
+            {% set hours_left = 0.0 %}
+          {% endif %}
+          {% if hours_left == 0.0 %}
+            {{ soc | round(1) }}
+          {% else %}
+            {% set kwh_to_burn = (discharge_w * hours_left) / 1000.0 %}
+            {% set soc_drop = (kwh_to_burn / 32.0) * 100.0 %}
+            {{ ([soc - soc_drop, 15.0] | max) | round(1) }}
+          {% endif %}
+
+      - name: "PANaHON Weather-Adaptive Minimum Morning Reserve Target"
+        unique_id: panahon_weather_adaptive_morning_reserve_target
+        unit_of_measurement: "%"
+        icon: mdi:shield-sun
+        state: >
+          {% set adv = states('sensor.panahon_solar_and_typhoon_battery_advisory') | default('') %}
+          {% set tomorrow_pv = states('sensor.panahon_tomorrow_forecasted_pv_energy') | float(20.0) %}
+          {% set storm_guard = is_state('binary_sensor.panahon_solar_storm_or_typhoon_guard_active', 'on') %}
+
+          {# If Typhoon / Severe Rain: Lock 85% to 90% reserve for brownout protection #}
+          {% if storm_guard or ('Backup' in adv) or ('Typhoon' in adv) %}
+            85
+          {# If tomorrow is cloudy or rainy (< 12 kWh expected on 5kWp): Hold 50% to 55% reserve #}
+          {% elif tomorrow_pv < 12.0 or ('Reserve' in adv) %}
+            55
+          {# If tomorrow has moderate generation (12 - 18 kWh): Standard 50% target #}
+          {% elif tomorrow_pv < 18.0 %}
+            50
+          {# If tomorrow is blazing clear (> 22 kWh expected): Safe to coast at 40% #}
+          {% else %}
+            42
+          {% endif %}
+
+      - name: "Solar Thermal AI Status"
+        unique_id: solar_thermal_ai_status
+        icon: mdi:brain
+        state: >
+          {% set pv = states('sensor.solis_s6_eh1p_total_pv_power') | float(0) %}
+          {% set soc = states('sensor.solis_s6_eh1p_battery_soc') | float(50) %}
+          {% set proj = states('sensor.projected_6am_battery_soc') | float(50) %}
+          {% set target_t = states('sensor.dynamic_precool_target_temp') | int(20) %}
+          {% set heat_index = states('sensor.panahon_pagasa_heat_index') | float(30) %}
+          {% set storm_guard = is_state('binary_sensor.panahon_solar_storm_or_typhoon_guard_active', 'on') %}
+          {% set reserve_target = states('sensor.panahon_weather_adaptive_minimum_morning_reserve_target') | int(50) %}
+          {% set ev = is_state('binary_sensor.dumb_7kw_ev_charger_detected', 'on') %}
+          {% set redline = is_state('binary_sensor.inverter_12kw_redline_alert', 'on') %}
+          {% set clean = is_state('switch.carrier_ir_blaster_carrier_self_clean', 'on') %}
+          {% set hr = now().hour + (now().minute / 60.0) %}
+
+          {% if clean %}
+            ❄️ Evaporator Self-Clean Lockout
+          {% elif redline %}
+            🚨 12kW Inverter Overload Shield Active
+          {% elif storm_guard %}
+            🌀 Typhoon & Storm Battery Guard Active ({{ reserve_target }}% Reserve)
+          {% elif hr >= 9.5 and hr < 15.5 %}
+            {% if ev and pv >= 7800 and soc >= 60 %}
+              🚗 7kW EV + Throttled Precool
+            {% elif ev %}
+              🔋 7kW EV Active - Battery Priority
+            {% elif target_t == 19 and pv >= 4500 and soc >= 70 %}
+              🔥 PAGASA {{ heat_index | round(0) }}°C Deep Precool (19°C)
+            {% elif target_t == 22 %}
+              🌧️ Rainy Eco Precool (22°C)
+            {% elif pv >= 4200 and soc >= 70 %}
+              ☀️ Solar Sponge ({{ target_t }}°C)
+            {% else %}
+              ⛅ Cloud-Throttled Precool
+            {% endif %}
+          {% elif hr >= 15.5 and hr < 17.25 %}
+            🌇 Golden Hour Battery Top-Off
+          {% elif hr >= 17.25 and hr < 21.5 %}
+            🌆 Sunset Feathering Transition
+          {% else %}
+            {% if proj >= (reserve_target + 2) and soc >= (reserve_target + 5) %}
+              🌙 Night Sip Mode (6AM Est: {{ proj }}% / Req: {{ reserve_target }}%)
+            {% elif proj >= reserve_target and soc >= reserve_target %}
+              🛡️ High-Reserve Coast Active
+            {% else %}
+              🔒 Master Bedroom Only (Floor Guard {{ reserve_target }}%)
+            {% endif %}
+          {% endif %}
+
+# ==============================================================================
+# AUTOMATION ENGINE: AUTONOMOUS SOLAR-THERMAL WITH PANaHON FORESIGHT
+# ==============================================================================
+
+automation:
+  - id: haynes_autonomous_solar_thermal_engine
+    alias: "AI: Autonomous Solar-Thermal & Weather-Adaptive Morning Battery Engine"
+    description: "Zero-touch weather-adaptive automation for Carrier and TCL ACs with 7kW EV detection and DOST-PAGASA solar foresight."
+    mode: restart
+    trigger:
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: state
+        entity_id:
+          - binary_sensor.inverter_12kw_redline_alert
+          - binary_sensor.dumb_7kw_ev_charger_detected
+          - binary_sensor.panahon_solar_storm_or_typhoon_guard_active
+          - weather.panahon_ph_forecast
+          - weather.forecast_home
+      - platform: time
+        at:
+          - "06:15:00"
+          - "10:00:00"
+          - "14:30:00"
+          - "15:30:00"
+          - "17:15:00"
+          - "21:30:00"
+          - "01:00:00"
+    condition:
+      - condition: state
+        entity_id: switch.carrier_ir_blaster_carrier_self_clean
+        state: "off"
+    variables:
+      pv_power: "{{ states('sensor.solis_s6_eh1p_total_pv_power') | float(0) }}"
+      batt_soc: "{{ states('sensor.solis_s6_eh1p_battery_soc') | float(50) }}"
+      batt_charge: "{{ states('sensor.solis_s6_eh1p_battery_charge_power') | float(0) }}"
+      proj_6am_soc: "{{ states('sensor.projected_6am_battery_soc') | float(50) }}"
+      reserve_target: "{{ states('sensor.panahon_weather_adaptive_minimum_morning_reserve_target') | int(50) }}"
+      precool_target: "{{ states('sensor.dynamic_precool_target_temp') | int(20) }}"
+      storm_guard: "{{ is_state('binary_sensor.panahon_solar_storm_or_typhoon_guard_active', 'on') }}"
+      ev_active: "{{ is_state('binary_sensor.dumb_7kw_ev_charger_detected', 'on') }}"
+      redline_active: "{{ is_state('binary_sensor.inverter_12kw_redline_alert', 'on') }}"
+      guest_temp: "{{ states('sensor.guest_room_ac_current_temperature') | float(24) }}"
+      hr: "{{ now().hour + (now().minute / 60.0) }}"
+
+    action:
+      - choose:
+          # --------------------------------------------------------------------
+          # 1. Redline Shield (12kW Overload or Inverter Overheat)
+          # --------------------------------------------------------------------
+          - conditions:
+              - condition: template
+                value_template: "{{ redline_active }}"
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.carrier_ir_blaster_carrier_turbo
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.carrier_ir_blaster_carrier_eco_mode
+              - service: climate.turn_off
+                target:
+                  entity_id:
+                    - climate.guest_room_ac_climate
+                    - climate.green_room_ac_climate
+
+          # --------------------------------------------------------------------
+          # 2. EV Active during day (Prioritize Inverter & Battery)
+          # --------------------------------------------------------------------
+          - conditions:
+              - condition: template
+                value_template: "{{ hr >= 9.5 and hr < 15.5 and ev_active }}"
+            sequence:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ pv_power >= 7800 and batt_soc >= 60 and hr < 14.25 and not storm_guard }}"
+                    sequence:
+                      - service: climate.set_temperature
+                        target:
+                          entity_id:
+                            - climate.dual_ac_ir_blaster_carrier_aura_ac
+                            - climate.guest_room_ac_climate
+                            - climate.green_room_ac_climate
+                        data:
+                          hvac_mode: cool
+                          temperature: "{{ [precool_target + 2, 22] | max }}"
+                      - service: switch.turn_off
+                        target:
+                          entity_id: switch.carrier_ir_blaster_carrier_turbo
+                      - service: switch.turn_on
+                        target:
+                          entity_id:
+                            - switch.carrier_ir_blaster_carrier_eco_mode
+                            - switch.guest_room_ac_ai_eco_switch
+                            - switch.green_room_ac_ai_eco_switch
+                default:
+                  - service: climate.set_temperature
+                    target:
+                      entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                    data:
+                      hvac_mode: cool
+                      temperature: 24
+                  - service: climate.set_fan_mode
+                    target:
+                      entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                    data:
+                      fan_mode: low
+                  - service: switch.turn_off
+                    target:
+                      entity_id: switch.carrier_ir_blaster_carrier_turbo
+                  - service: climate.turn_off
+                    target:
+                      entity_id:
+                        - climate.guest_room_ac_climate
+                        - climate.green_room_ac_climate
+
+          # --------------------------------------------------------------------
+          # 3. Weather-Adaptive Precool (9:30 AM - 3:30 PM)
+          # --------------------------------------------------------------------
+          - conditions:
+              - condition: template
+                value_template: "{{ hr >= 9.5 and hr < 15.5 and not ev_active }}"
+            sequence:
+              - choose:
+                  # Rainy / Storm / Moderate Sun: Run Eco Precool (22°C)
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ storm_guard or precool_target == 22 }}"
+                    sequence:
+                      - service: switch.turn_off
+                        target:
+                          entity_id: switch.carrier_ir_blaster_carrier_turbo
+                      - service: switch.turn_on
+                        target:
+                          entity_id:
+                            - switch.carrier_ir_blaster_carrier_eco_mode
+                            - switch.guest_room_ac_ai_eco_switch
+                            - switch.green_room_ac_ai_eco_switch
+                      - service: climate.set_temperature
+                        target:
+                          entity_id:
+                            - climate.dual_ac_ir_blaster_carrier_aura_ac
+                            - climate.guest_room_ac_climate
+                            - climate.green_room_ac_climate
+                        data:
+                          hvac_mode: cool
+                          temperature: 22
+
+                  # High Solar Sponge: Deep Thermal Precool (19°C - 20°C)
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ pv_power >= 4200 and (batt_soc >= 70 or batt_charge >= 2500) }}"
+                    sequence:
+                      - service: switch.turn_off
+                        target:
+                          entity_id:
+                            - switch.carrier_ir_blaster_carrier_eco_mode
+                            - switch.guest_room_ac_ai_eco_switch
+                            - switch.green_room_ac_ai_eco_switch
+                      - service: climate.set_temperature
+                        target:
+                          entity_id:
+                            - climate.dual_ac_ir_blaster_carrier_aura_ac
+                            - climate.guest_room_ac_climate
+                            - climate.green_room_ac_climate
+                        data:
+                          hvac_mode: cool
+                          temperature: "{{ precool_target }}"
+                      - service: climate.set_fan_mode
+                        target:
+                          entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                        data:
+                          fan_mode: high
+                      - if:
+                          - condition: template
+                            value_template: "{{ precool_target <= 19 }}"
+                        then:
+                          - service: switch.turn_on
+                            target:
+                              entity_id: switch.carrier_ir_blaster_carrier_turbo
+                        else:
+                          - service: switch.turn_off
+                            target:
+                              entity_id: switch.carrier_ir_blaster_carrier_turbo
+                default:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: switch.carrier_ir_blaster_carrier_turbo
+                  - service: switch.turn_on
+                    target:
+                      entity_id:
+                        - switch.carrier_ir_blaster_carrier_eco_mode
+                        - switch.guest_room_ac_ai_eco_switch
+                        - switch.green_room_ac_ai_eco_switch
+                  - service: climate.set_temperature
+                    target:
+                      entity_id:
+                        - climate.dual_ac_ir_blaster_carrier_aura_ac
+                        - climate.guest_room_ac_climate
+                        - climate.green_room_ac_climate
+                    data:
+                      hvac_mode: cool
+                      temperature: 23
+
+          # --------------------------------------------------------------------
+          # 4. Golden Hour Top-Off (3:30 PM - 5:15 PM)
+          # --------------------------------------------------------------------
+          - conditions:
+              - condition: template
+                value_template: "{{ hr >= 15.5 and hr < 17.25 }}"
+            sequence:
+              - service: switch.turn_off
+                target:
+                  entity_id: switch.carrier_ir_blaster_carrier_turbo
+              - service: switch.turn_on
+                target:
+                  entity_id:
+                    - switch.carrier_ir_blaster_carrier_eco_mode
+                    - switch.guest_room_ac_ai_eco_switch
+                    - switch.green_room_ac_ai_eco_switch
+              - service: climate.set_temperature
+                target:
+                  entity_id:
+                    - climate.dual_ac_ir_blaster_carrier_aura_ac
+                    - climate.guest_room_ac_climate
+                    - climate.green_room_ac_climate
+                data:
+                  hvac_mode: cool
+                  temperature: "{{ 21 if (batt_soc >= 95 and pv_power >= 2000 and not storm_guard) else 23 }}"
+
+          # --------------------------------------------------------------------
+          # 5. Sunset Feathering (5:15 PM - 9:30 PM)
+          # --------------------------------------------------------------------
+          - conditions:
+              - condition: template
+                value_template: "{{ hr >= 17.25 and hr < 21.5 }}"
+            sequence:
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                data:
+                  hvac_mode: cool
+                  temperature: 24
+              - service: climate.set_fan_mode
+                target:
+                  entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                data:
+                  fan_mode: low
+              - service: switch.turn_on
+                target:
+                  entity_id:
+                    - switch.carrier_ir_blaster_carrier_eco_mode
+                    - switch.guest_room_ac_ai_eco_switch
+                    - switch.green_room_ac_ai_eco_switch
+              - service: climate.set_temperature
+                target:
+                  entity_id:
+                    - climate.guest_room_ac_climate
+                    - climate.green_room_ac_climate
+                data:
+                  hvac_mode: cool
+                  temperature: 24
+
+          # --------------------------------------------------------------------
+          # 6. Overnight Reserve Engine with Weather-Adaptive Floor
+          # --------------------------------------------------------------------
+          - conditions:
+              - condition: template
+                value_template: "{{ hr >= 21.5 or hr < 6.0 }}"
+            sequence:
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                data:
+                  hvac_mode: cool
+                  temperature: "{{ 26 if (proj_6am_soc < (reserve_target - 2) or batt_soc < reserve_target) else 25 }}"
+              - service: climate.set_fan_mode
+                target:
+                  entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                data:
+                  fan_mode: low
+              - service: switch.turn_on
+                target:
+                  entity_id:
+                    - switch.carrier_ir_blaster_carrier_eco_mode
+                    - switch.carrier_ir_blaster_carrier_breeze_away
+              - choose:
+                  # If projected 6AM SOC comfortably clears the weather-adaptive target
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ proj_6am_soc >= (reserve_target + 1) and batt_soc >= (reserve_target + 4) }}"
+                    sequence:
+                      - service: switch.turn_on
+                        target:
+                          entity_id:
+                            - switch.guest_room_ac_ai_eco_switch
+                            - switch.green_room_ac_ai_eco_switch
+                      - service: climate.set_temperature
+                        target:
+                          entity_id:
+                            - climate.guest_room_ac_climate
+                            - climate.green_room_ac_climate
+                        data:
+                          hvac_mode: cool
+                          temperature: "{{ 26 if (hr >= 1.0 and hr < 6.0) else 25 }}"
+                  # Edge of reserve: Prioritize Green Room, turn off Guest Room if cool
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ proj_6am_soc >= (reserve_target - 3) and batt_soc >= reserve_target }}"
+                    sequence:
+                      - if:
+                          - condition: template
+                            value_template: "{{ guest_temp <= 26.0 }}"
+                        then:
+                          - service: climate.turn_off
+                            target:
+                              entity_id: climate.guest_room_ac_climate
+                      - service: climate.set_temperature
+                        target:
+                          entity_id: climate.green_room_ac_climate
+                        data:
+                          hvac_mode: cool
+                          temperature: 26
+                default:
+                  - service: climate.turn_off
+                    target:
+                      entity_id:
+                        - climate.guest_room_ac_climate
+                        - climate.green_room_ac_climate
+
+          # --------------------------------------------------------------------
+          # 7. Morning Reset (6:00 AM - 9:30 AM)
+          # --------------------------------------------------------------------
+          - conditions:
+              - condition: template
+                value_template: "{{ hr >= 6.0 and hr < 9.5 }}"
+            sequence:
+              - service: climate.turn_off
+                target:
+                  entity_id:
+                    - climate.guest_room_ac_climate
+                    - climate.green_room_ac_climate
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.dual_ac_ir_blaster_carrier_aura_ac
+                data:
+                  hvac_mode: cool
+                  temperature: 25
+
+  - id: haynes_ev_charger_late_afternoon_guard
+    alias: "AI: 2:30 PM EV Charger Battery Protection Alert"
+    description: "Alerts phone if 7kW EV charger runs past 2:30 PM with battery under 90%."
+    mode: restart
+    trigger:
+      - platform: time
+        at: "14:30:00"
+      - platform: time_pattern
+        minutes: "/20"
+      - platform: state
+        entity_id: binary_sensor.dumb_7kw_ev_charger_detected
+        to: "on"
+      - platform: state
+        entity_id: binary_sensor.dumb_7kw_ev_charger_detected
+        to: "off"
+      - platform: numeric_state
+        entity_id: sensor.solis_s6_eh1p_battery_soc
+        above: 90
+    variables:
+      batt_soc: "{{ states('sensor.solis_s6_eh1p_battery_soc') | float(0) }}"
+      pv_power: "{{ states('sensor.solis_s6_eh1p_total_pv_power') | float(0) }}"
+    action:
+      - choose:
+          - conditions:
+              - condition: time
+                after: "14:29:59"
+                before: "20:00:00"
+              - condition: state
+                entity_id: binary_sensor.dumb_7kw_ev_charger_detected
+                state: "on"
+              - condition: numeric_state
+                entity_id: sensor.solis_s6_eh1p_battery_soc
+                below: 90
+            sequence:
+              - service: notify.notify
+                data:
+                  title: "⚠️ Unplug 7kW EV Charger Now!"
+                  message: >
+                    Battery is at {{ batt_soc | round(0) }}% past 2:30 PM.
+                    Unplug the EV to let the 32kWh bank reach 100% before sunset!
+                  data:
+                    tag: "ev_late_charge_warning"
+                    importance: high
+                    priority: high
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.dumb_7kw_ev_charger_detected
+                state: "off"
+            sequence:
+              - service: persistent_notification.dismiss
+                data:
+                  notification_id: "ev_late_charge_warning"
+              - service: notify.notify
+                data:
+                  message: "clear_notification"
+                  data:
+                    tag: "ev_late_charge_warning"

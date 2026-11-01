@@ -1,0 +1,21 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Python bytecode & virtualenvs
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# APK / XAPK extraction & build artifacts
+extracted/
+build/
+*.apk
+*.xapk
+*.idsig
+*.keystore
+tmp_*/
+.etag_cache.json

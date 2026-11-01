@@ -1,0 +1,161 @@
+# ==============================================================================
+# Home Assistant Configuration: DOST-PAGASA PANaHON & PH Solar System Planner
+# ==============================================================================
+# Works two ways:
+# 1. Native Custom Component: Copy `custom_components/panahon_solar` into your
+#    Home Assistant `/config/custom_components/panahon_solar`, restart HA, and
+#    add "DOST-PAGASA PANaHON & PH Solar Forecast" via Settings -> Integrations!
+# 2. Local REST Bridge (Below): Run `panahon_solar_service.py` on your umbrelOS
+#    server (e.g. http://192.168.68.84:8089) and paste the `rest:` block below
+#    into your Home Assistant `configuration.yaml`.
+# ==============================================================================
+
+rest:
+  - resource: "http://192.168.68.84:8089/api/v1/solar-dashboard"
+    scan_interval: 600
+    timeout: 15
+    sensor:
+      - name: "PANaHON Solar Radiation (GHI)"
+        unique_id: "panahon_ph_solar_radiation_avg"
+        value_template: "{{ value_json.solar_telemetry.solar_radiation_avg | default(0) }}"
+        unit_of_measurement: "W/m²"
+        device_class: "irradiance"
+        state_class: "measurement"
+
+      - name: "PANaHON Roof Tilted Irradiance (GTI)"
+        unique_id: "panahon_ph_tilted_irradiance"
+        value_template: "{{ value_json.solar_telemetry.global_tilted_irradiance_wm2 | default(0) }}"
+        unit_of_measurement: "W/m²"
+        device_class: "irradiance"
+        state_class: "measurement"
+
+      - name: "PANaHON Estimated PV Power"
+        unique_id: "panahon_ph_estimated_pv_power_kw"
+        value_template: "{{ value_json.solar_telemetry.estimated_pv_power_kw | default(0) }}"
+        unit_of_measurement: "kW"
+        device_class: "power"
+        state_class: "measurement"
+
+      - name: "PANaHON Today Forecasted PV Yield"
+        unique_id: "panahon_ph_today_pv_kwh"
+        value_template: "{{ value_json.solar_telemetry.estimated_today_pv_kwh | default(0) }}"
+        unit_of_measurement: "kWh"
+        device_class: "energy"
+        state_class: "total"
+
+      - name: "PANaHON Remaining Today PV Yield"
+        unique_id: "panahon_ph_remaining_today_pv_kwh"
+        value_template: "{{ value_json.solar_telemetry.estimated_remaining_today_pv_kwh | default(0) }}"
+        unit_of_measurement: "kWh"
+        device_class: "energy"
+
+      - name: "PANaHON Tomorrow Forecasted PV Yield"
+        unique_id: "panahon_ph_tomorrow_pv_kwh"
+        value_template: "{{ value_json.solar_telemetry.estimated_tomorrow_pv_kwh | default(0) }}"
+        unit_of_measurement: "kWh"
+        device_class: "energy"
+
+      - name: "PANaHON Peak Sun Hours Today"
+        unique_id: "panahon_ph_peak_sun_hours_today"
+        value_template: "{{ value_json.solar_telemetry.peak_sun_hours_today | default(0) }}"
+        unit_of_measurement: "h"
+        state_class: "measurement"
+
+      - name: "PANaHON PV Cell Temperature"
+        unique_id: "panahon_ph_pv_cell_temp_c"
+        value_template: "{{ value_json.solar_telemetry.pv_cell_temp_c | default(25) }}"
+        unit_of_measurement: "°C"
+        device_class: "temperature"
+        state_class: "measurement"
+
+      - name: "PANaHON Tropical Thermal Derating"
+        unique_id: "panahon_ph_thermal_derating_pct"
+        value_template: "{{ value_json.solar_telemetry.thermal_derating_pct | default(0) }}"
+        unit_of_measurement: "%"
+        state_class: "measurement"
+
+      - name: "PANaHON Air Temperature"
+        unique_id: "panahon_ph_air_temp_c"
+        value_template: "{{ value_json.nowcast.air_temperature_avg | default(28) }}"
+        unit_of_measurement: "°C"
+        device_class: "temperature"
+        state_class: "measurement"
+
+      - name: "PANaHON PAGASA Heat Index"
+        unique_id: "panahon_ph_heat_index_c"
+        value_template: "{{ value_json.nowcast.heat_index_avg | default(30) }}"
+        unit_of_measurement: "°C"
+        device_class: "temperature"
+        state_class: "measurement"
+        json_attributes_path: "$.nowcast"
+        json_attributes:
+          - "heat_index_description"
+          - "rainfall_description"
+          - "relative_humidity_avg"
+
+      - name: "PANaHON 1h Rainfall"
+        unique_id: "panahon_ph_rainfall_1h_mm"
+        value_template: "{{ value_json.nowcast.rainfall | default(0) }}"
+        unit_of_measurement: "mm"
+        device_class: "precipitation"
+        state_class: "measurement"
+
+      - name: "PANaHON Cloud Cover"
+        unique_id: "panahon_ph_cloud_cover_pct"
+        value_template: "{{ value_json.nowcast.cloud_cover_pct | default(0) }}"
+        unit_of_measurement: "%"
+        state_class: "measurement"
+
+      - name: "PANaHON Solar & Typhoon Battery Advisory"
+        unique_id: "panahon_ph_typhoon_battery_advisory"
+        value_template: "{{ value_json.solar_telemetry.typhoon_battery_advisory }}"
+        json_attributes_path: "$.solar_telemetry"
+        json_attributes:
+          - "recommended_min_battery_soc_pct"
+          - "peak_sun_hours_tomorrow"
+
+# ------------------------------------------------------------------------------
+# SMART SOLAR & AC AUTOMATIONS FOR PHILIPPINE HOMES
+# ------------------------------------------------------------------------------
+automation:
+  - id: "panahon_solar_precool_green_room_ac"
+    alias: "Solar Excess: Precool Green Room TCL BreezeIN+ AC"
+    description: "Automatically runs Green Room AC in ECO Cool mode when PANaHON PV output exceeds 2.8 kW and Heat Index is in Extreme Caution (>=33°C)."
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.panahon_estimated_pv_power
+        above: 2.8
+        for: "00:10:00"
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.panahon_pagasa_heat_index
+        above: 33.0
+    action:
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.green_room_breezein
+        data:
+          hvac_mode: "cool"
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.green_room_breezein
+        data:
+          temperature: 24
+
+  - id: "panahon_typhoon_battery_reserve_alert"
+    alias: "Solar Storm Guard: Hold Battery Reserve on Heavy Rain / Typhoon"
+    description: "Notifies when PAGASA / ECMWF forecast detects low tomorrow solar yield or severe rain so inverter battery reserve can be raised."
+    trigger:
+      - platform: state
+        entity_id: sensor.panahon_solar_typhoon_battery_advisory
+    condition:
+      - condition: template
+        value_template: "{{ 'Backup' in states('sensor.panahon_solar_typhoon_battery_advisory') or 'Reserve' in states('sensor.panahon_solar_typhoon_battery_advisory') }}"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "PANaHON Solar & Battery Advisory"
+          message: >-
+            Advisory: {{ states('sensor.panahon_solar_typhoon_battery_advisory') }}.
+            Recommended Minimum Battery SOC: {{ state_attr('sensor.panahon_solar_typhoon_battery_advisory', 'recommended_min_battery_soc_pct') }}%.
+            Tomorrow Forecasted PV Yield: {{ states('sensor.panahon_tomorrow_forecasted_pv_yield') }} kWh.

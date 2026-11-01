@@ -1,0 +1,182 @@
+# ==============================================================================
+# HAYNES SOLAR-THERMAL AI & PANaHON LOVELACE DASHBOARD CARDS
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# OPTION 1: THE DIRECT DROP-IN UPGRADE (Clean, Polished & Mobile-Optimized)
+# ------------------------------------------------------------------------------
+# Replaces your existing vertical-stack card with PANaHON solar foresight,
+# PAGASA Heat Index, and intelligent color states.
+# ------------------------------------------------------------------------------
+
+type: vertical-stack
+cards:
+  # 1. Autonomous Engine Status Tile
+  - type: tile
+    entity: sensor.solar_thermal_ai_status
+    name: Autonomous Thermal Engine
+    color: cyan
+    icon: mdi:robot-happy
+    show_entity_picture: false
+
+  # 2. Critical Safety & EV Detection Row (Columns: 3)
+  - type: grid
+    columns: 3
+    square: false
+    cards:
+      - type: tile
+        entity: binary_sensor.dumb_7kw_ev_charger_detected
+        name: 7kW EV Charger
+        color: amber
+        icon: mdi:car-electric
+      - type: tile
+        entity: binary_sensor.inverter_12kw_redline_alert
+        name: 12kW Overload Guard
+        color: red
+        icon: mdi:shield-check
+      - type: tile
+        entity: binary_sensor.panahon_solar_storm_or_typhoon_guard_active
+        name: Storm / Typhoon Guard
+        color: deep-orange
+        icon: mdi:weather-hurricane
+
+  # 3. Dynamic Thermal & Morning Battery Reserve Targets (Columns: 3)
+  - type: grid
+    columns: 3
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.dynamic_precool_target_temp
+        name: Precool Target
+        color: blue
+        icon: mdi:snowflake-thermometer
+      - type: tile
+        entity: sensor.projected_6am_battery_soc
+        name: 6AM Battery Est.
+        color: green
+        icon: mdi:battery-clock
+      - type: tile
+        entity: sensor.panahon_weather_adaptive_minimum_morning_reserve_target
+        name: Target Morning Reserve
+        color: teal
+        icon: mdi:shield-sun
+
+  # 4. DOST-PAGASA Telemetry & Solar Foresight (Columns: 3)
+  - type: grid
+    columns: 3
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.panahon_pagasa_heat_index
+        name: PAGASA Heat Index
+        color: orange
+        icon: mdi:sun-thermometer
+      - type: tile
+        entity: sensor.panahon_roof_tilted_irradiance_gti
+        name: Roof Irradiance
+        color: yellow
+        icon: mdi:solar-power-variant
+      - type: tile
+        entity: sensor.panahon_tomorrow_forecasted_pv_energy
+        name: Tomorrow PV Yield
+        color: light-green
+        icon: mdi:chart-timeline-variant-shimmer
+
+---
+
+# ------------------------------------------------------------------------------
+# OPTION 2: THE EXECUTIVE SOLAR-THERMAL COMMAND CARD (Pro / High-End Dashboard)
+# ------------------------------------------------------------------------------
+# Features:
+# - Auto-expanding Redline & EV Warning Banners (only show when active)
+# - Solis S6 Inverter Power & Battery Gauge
+# - 32kWh Battery depletion timeline to 6 AM
+# - Live PAGASA Heat Index + Tomorrow's PV harvest forecast
+# ------------------------------------------------------------------------------
+
+type: vertical-stack
+cards:
+  # Conditional Alert 1: 12kW Inverter Overload Redline Shield
+  - type: conditional
+    conditions:
+      - entity: binary_sensor.inverter_12kw_redline_alert
+        state: "on"
+    card:
+      type: tile
+      entity: binary_sensor.inverter_12kw_redline_alert
+      name: "CRITICAL: 12kW Inverter Redline Shield Active"
+      color: red
+      icon: mdi:flash-alert
+
+  # Conditional Alert 2: 7kW EV Charger Active
+  - type: conditional
+    conditions:
+      - entity: binary_sensor.dumb_7kw_ev_charger_detected
+        state: "on"
+    card:
+      type: tile
+      entity: binary_sensor.dumb_7kw_ev_charger_detected
+      name: "7kW EV Charger Connected - AC Precooling Throttled"
+      color: amber
+      icon: mdi:car-electric
+
+  # Conditional Alert 3: Typhoon & Heavy Rainfall Battery Reserve Guard
+  - type: conditional
+    conditions:
+      - entity: binary_sensor.panahon_solar_storm_or_typhoon_guard_active
+        state: "on"
+    card:
+      type: tile
+      entity: sensor.panahon_solar_and_typhoon_battery_advisory
+      name: "DOST-PAGASA Advisory Active"
+      color: deep-orange
+      icon: mdi:weather-hurricane
+
+  # Primary Engine Status
+  - type: tile
+    entity: sensor.solar_thermal_ai_status
+    name: Haynes Autonomous Solar-Thermal AI
+    color: cyan
+    icon: mdi:brain
+
+  # Primary Solar & Battery Glance
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.solis_s6_eh1p_total_pv_power
+        name: Live Solis PV Output
+        color: yellow
+        icon: mdi:solar-power
+      - type: tile
+        entity: sensor.solis_s6_eh1p_battery_soc
+        name: 32kWh Battery Bank
+        color: green
+        icon: mdi:battery-high
+
+  # AI Decision & Tomorrow's Forecast Grid
+  - type: grid
+    columns: 4
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.dynamic_precool_target_temp
+        name: Precool Target
+        color: blue
+        icon: mdi:snowflake-thermometer
+      - type: tile
+        entity: sensor.projected_6am_battery_soc
+        name: 6AM Battery Est.
+        color: green
+        icon: mdi:battery-positive
+      - type: tile
+        entity: sensor.panahon_pagasa_heat_index
+        name: PAGASA Heat Index
+        color: orange
+        icon: mdi:sun-thermometer
+      - type: tile
+        entity: sensor.panahon_tomorrow_forecasted_pv_energy
+        name: Tomorrow PV
+        color: light-green
+        icon: mdi:solar-panel-large

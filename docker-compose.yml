@@ -1,0 +1,9 @@
+services:
+  panahon-solar-ha:
+    build: .
+    container_name: panahon-solar-ha
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8089:8089"
