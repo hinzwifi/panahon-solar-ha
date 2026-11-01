@@ -2,18 +2,57 @@
   "config": {
     "step": {
       "user": {
-        "title": "DOST-PAGASA PANaHON & PH Solar Setup",
-        "description": "Configure your Philippine coordinates, solar PV array kWp, and optional PANaHON mobile device credentials.",
+        "title": "Step 1: Location & Solar Array",
+        "description": "Enter your Philippine coordinates and solar PV array size.",
         "data": {
           "name": "Integration Name",
-          "latitude": "Philippine Latitude",
-          "longitude": "Philippine Longitude",
-          "array_kwp": "Solar PV Array Size (kWp)",
-          "panel_tilt": "Roof Panel Tilt (Degrees, e.g. 14° for PH)",
+          "latitude": "Latitude (Defaults to your HA location)",
+          "longitude": "Longitude (Defaults to your HA location)",
+          "array_kwp": "Solar PV Array Capacity (kWp)",
+          "panel_tilt": "Roof Panel Tilt (Degrees, 14° standard for PH)"
+        }
+      },
+      "advanced": {
+        "title": "Step 2: Roof Azimuth & Advanced Link (Optional)",
+        "description": "Configure roof facing angle and optional DOST-PAGASA mobile app station link. Leave tokens blank to use automatic ECMWF tropical modeling.",
+        "data": {
+          "panel_azimuth": "Panel Azimuth (0° = South, 90° = West, -90° = East)",
+          "system_efficiency": "System Efficiency (0.82 = 82%)",
+          "panahon_device_id": "Optional PANaHON X-Device-Id (Leave blank for auto)",
+          "panahon_access_token": "Optional PANaHON Bearer Token (Leave blank for auto)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure DOST-PAGASA PANaHON & PH Solar",
+        "description": "Update your solar array parameters, roof angles, or station credentials.",
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "array_kwp": "Solar Array (kWp)",
+          "panel_tilt": "Roof Tilt (Degrees)",
           "panel_azimuth": "Panel Azimuth (0° = South)",
-          "system_efficiency": "Inverter & Wiring Efficiency (0.82 = 82%)",
-          "panahon_device_id": "Optional PANaHON X-Device-Id",
-          "panahon_access_token": "Optional PANaHON Bearer Access Token"
+          "system_efficiency": "System Efficiency",
+          "panahon_device_id": "Optional PANaHON Device ID",
+          "panahon_access_token": "Optional PANaHON Access Token"
+        }
+      }
+    },
+    "abort": {
+      "reconfigure_successful": "Reconfiguration successful! Your solar forecast has been updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Solar Forecast Options",
+        "description": "Fine-tune your solar array specifications, roof angles, or station tokens anytime without re-adding the integration.",
+        "data": {
+          "array_kwp": "Solar Array Capacity (kWp)",
+          "panel_tilt": "Panel Tilt (Degrees)",
+          "panel_azimuth": "Panel Azimuth (0° = South)",
+          "system_efficiency": "System Efficiency",
+          "panahon_device_id": "Optional PANaHON Device ID",
+          "panahon_access_token": "Optional PANaHON Access Token"
         }
       }
     }

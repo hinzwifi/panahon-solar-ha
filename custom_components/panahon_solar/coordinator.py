@@ -95,14 +95,15 @@ class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         session = async_get_clientsession(self.hass)
-        lat = float(self.entry.data.get(CONF_LATITUDE, 14.5995))
-        lon = float(self.entry.data.get(CONF_LONGITUDE, 120.9842))
-        array_kwp = float(self.entry.data.get(CONF_ARRAY_KWP, DEFAULT_ARRAY_KWP))
-        tilt = float(self.entry.data.get(CONF_PANEL_TILT, DEFAULT_PANEL_TILT))
-        azimuth = float(self.entry.data.get(CONF_PANEL_AZIMUTH, DEFAULT_PANEL_AZIMUTH))
-        sys_eff = float(self.entry.data.get(CONF_SYS_EFFICIENCY, DEFAULT_SYS_EFFICIENCY))
-        device_id = str(self.entry.data.get(CONF_DEVICE_ID, "")).strip()
-        access_token = str(self.entry.data.get(CONF_ACCESS_TOKEN, "")).strip()
+        config = {**self.entry.data, **self.entry.options}
+        lat = float(config.get(CONF_LATITUDE, 14.5995))
+        lon = float(config.get(CONF_LONGITUDE, 120.9842))
+        array_kwp = float(config.get(CONF_ARRAY_KWP, DEFAULT_ARRAY_KWP))
+        tilt = float(config.get(CONF_PANEL_TILT, DEFAULT_PANEL_TILT))
+        azimuth = float(config.get(CONF_PANEL_AZIMUTH, DEFAULT_PANEL_AZIMUTH))
+        sys_eff = float(config.get(CONF_SYS_EFFICIENCY, DEFAULT_SYS_EFFICIENCY))
+        device_id = str(config.get(CONF_DEVICE_ID, "")).strip()
+        access_token = str(config.get(CONF_ACCESS_TOKEN, "")).strip()
 
         panahon_obs: dict[str, Any] = {}
         if device_id and access_token:
