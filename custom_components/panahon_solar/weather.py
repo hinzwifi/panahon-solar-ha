@@ -113,6 +113,22 @@ class PanahonWeatherEntity(
     def cloud_coverage(self) -> float | None:
         return self.coordinator.data.get("cloud_cover_pct") if self.coordinator.data else None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if not self.coordinator.data:
+            return {}
+        data = self.coordinator.data
+        attrs: dict[str, Any] = {
+            "data_source": data.get("data_source"),
+        }
+        if data.get("pagasa_barangay"):
+            attrs["pagasa_location"] = f"{data.get('pagasa_barangay')}, {data.get('pagasa_municipality')}, {data.get('pagasa_province')}"
+        if data.get("pagasa_rain_map_url"):
+            attrs["pagasa_rain_map_url"] = data.get("pagasa_rain_map_url")
+        if data.get("pagasa_public_weather_url"):
+            attrs["pagasa_public_weather_url"] = data.get("pagasa_public_weather_url")
+        return attrs
+
     async def async_forecast_daily(self) -> list[Forecast] | None:
         if not self.coordinator.data:
             return None

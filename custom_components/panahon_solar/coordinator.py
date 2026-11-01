@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
+import re
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -29,6 +30,19 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 PH_TZ = timezone(timedelta(hours=8))
+
+
+def _clean_numeric(raw: Any, default: float = 0.0) -> float:
+    """Parse numeric strings like '31 °C' or '0.34 mm' to float."""
+    if raw is None:
+        return default
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    cleaned = re.sub(r"[^\d.-]", "", str(raw)).strip()
+    try:
+        return float(cleaned) if cleaned else default
+    except ValueError:
+        return default
 
 
 def _calculate_heat_index(temp_c: float, rh_pct: float) -> tuple[float, str]:
@@ -80,7 +94,7 @@ def _compute_pv(
 
 
 class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Coordinator fetching PANaHON / ECMWF PH weather and solar irradiance."""
+    """Coordinator fetching official DOST-PAGASA PANaHON data and solar irradiance."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
@@ -102,31 +116,63 @@ class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         tilt = float(config.get(CONF_PANEL_TILT, DEFAULT_PANEL_TILT))
         azimuth = float(config.get(CONF_PANEL_AZIMUTH, DEFAULT_PANEL_AZIMUTH))
         sys_eff = float(config.get(CONF_SYS_EFFICIENCY, DEFAULT_SYS_EFFICIENCY))
-        device_id = str(config.get(CONF_DEVICE_ID, "")).strip()
-        access_token = str(config.get(CONF_ACCESS_TOKEN, "")).strip()
 
-        panahon_obs: dict[str, Any] = {}
-        if device_id and access_token:
-            obs_url = f"{PANAHON_BASE_URL}/observation/automatic"
-            headers = {
-                "X-Device-Id": device_id,
-                "Authorization": f"Bearer {access_token}",
-            }
-            if obs_url in self._etag_by_url:
-                headers["If-None-Match"] = self._etag_by_url[obs_url]
-            try:
-                async with session.get(obs_url, headers=headers, timeout=10) as resp:
-                    if resp.status == 200:
-                        panahon_obs = await resp.json()
+        panahon_dashboard: dict[str, Any] = {}
+        panahon_alerts: list[dict[str, Any]] = []
+        is_direct_panahon = False
+
+        # 1. Fetch Official DOST-PAGASA PANaHON Nowcast Dashboard
+        dashboard_url = f"{PANAHON_BASE_URL}/nowcast/dashboard?latitude={lat}&longitude={lon}"
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "PANaHON/1.1.3 (DOST-PAGASA)",
+        }
+        if dashboard_url in self._etag_by_url:
+            headers["If-None-Match"] = self._etag_by_url[dashboard_url]
+
+        try:
+            async with session.get(dashboard_url, headers=headers, timeout=12) as resp:
+                if resp.status == 200:
+                    raw_dash = await resp.json()
+                    if raw_dash.get("success"):
+                        panahon_dashboard = raw_dash
+                        is_direct_panahon = True
                         etag = resp.headers.get("ETag")
                         if etag:
-                            self._etag_by_url[obs_url] = etag
-                            self._body_by_url[obs_url] = panahon_obs
-                    elif resp.status == 304:
-                        panahon_obs = self._body_by_url.get(obs_url, {})
-            except Exception as err:
-                _LOGGER.debug("PANaHON mobile observation fallback triggered: %s", err)
+                            self._etag_by_url[dashboard_url] = etag
+                            self._body_by_url[dashboard_url] = raw_dash
+                elif resp.status == 304:
+                    panahon_dashboard = self._body_by_url.get(dashboard_url, {})
+                    is_direct_panahon = True
+        except Exception as err:
+            _LOGGER.debug("Direct PANaHON dashboard endpoint error: %s", err)
 
+        # 2. Fetch Official DOST-PAGASA Weather & Typhoon Alerts
+        alerts_url = f"{PANAHON_BASE_URL}/alerts"
+        alerts_headers = {
+            "Accept": "application/json",
+            "User-Agent": "PANaHON/1.1.3 (DOST-PAGASA)",
+        }
+        if alerts_url in self._etag_by_url:
+            alerts_headers["If-None-Match"] = self._etag_by_url[alerts_url]
+
+        try:
+            async with session.get(alerts_url, headers=alerts_headers, timeout=10) as resp:
+                if resp.status == 200:
+                    raw_alerts = await resp.json()
+                    if raw_alerts.get("success"):
+                        panahon_alerts = raw_alerts.get("data", [])
+                        etag = resp.headers.get("ETag")
+                        if etag:
+                            self._etag_by_url[alerts_url] = etag
+                            self._body_by_url[alerts_url] = raw_alerts
+                elif resp.status == 304:
+                    cached = self._body_by_url.get(alerts_url, {})
+                    panahon_alerts = cached.get("data", [])
+        except Exception as err:
+            _LOGGER.debug("Direct PANaHON alerts endpoint error: %s", err)
+
+        # 3. Fetch Solar Irradiance Engine (ECMWF IFS Global Tilted & Horizontal Irradiance)
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -155,26 +201,44 @@ class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "https://api.open-meteo.com/v1/forecast", params=params, timeout=15
             ) as resp:
                 if resp.status != 200:
-                    raise UpdateFailed(f"Upstream forecast error: HTTP {resp.status}")
+                    raise UpdateFailed(f"Solar forecast engine error: HTTP {resp.status}")
                 ecmwf = await resp.json()
         except Exception as err:
-            raise UpdateFailed(f"Error communicating with forecast upstream: {err}") from err
+            raise UpdateFailed(f"Error communicating with solar forecast engine: {err}") from err
 
         curr = ecmwf.get("current", {})
         hourly = ecmwf.get("hourly", {})
         daily = ecmwf.get("daily", {})
 
-        air_temp = float(panahon_obs.get("air_temperature_avg") or curr.get("temperature_2m", 30.0))
-        rh = float(panahon_obs.get("relative_humidity_avg") or curr.get("relative_humidity_2m", 70.0))
-        ghi = float(panahon_obs.get("solar_radiation_avg") or curr.get("shortwave_radiation", 0.0))
-        gti = float(curr.get("global_tilted_irradiance", ghi))
-        precip_1h = float(panahon_obs.get("rainfall") or curr.get("precipitation", 0.0))
-        cloud_cover = float(curr.get("cloud_cover", 0.0))
-        wind_speed = float(panahon_obs.get("wind_speed") or curr.get("wind_speed_10m", 0.0))
-        wind_dir = float(curr.get("wind_direction_10m", 0.0))
-        pressure = float(panahon_obs.get("barometric_pressure_avg") or curr.get("pressure_msl", 1010.0))
+        # Extract Official DOST-PAGASA Nowcast Data
+        nc = panahon_dashboard.get("data", {}).get("nc", {})
+        meta = panahon_dashboard.get("meta", {})
 
-        hi_c, hi_desc = _calculate_heat_index(air_temp, rh)
+        if is_direct_panahon and nc:
+            data_source = "DOST-PAGASA PANaHON API (api.mobile.panahon.gov.ph)"
+            air_temp = _clean_numeric(nc.get("tmp"), curr.get("temperature_2m", 30.0))
+            hi_c = _clean_numeric(nc.get("hindex"), curr.get("apparent_temperature", 35.0))
+            hi_desc = str(nc.get("hindex_desc") or "Caution")
+            precip_1h = _clean_numeric(nc.get("tprecip"), curr.get("precipitation", 0.0))
+            precip_desc = str(nc.get("tprecip_desc") or "No Rain")
+            weather_desc = str(nc.get("desc") or "Partly cloudy")
+        else:
+            data_source = "ECMWF Numerical Tropical Forecast Engine"
+            air_temp = float(curr.get("temperature_2m", 30.0))
+            rh = float(curr.get("relative_humidity_2m", 70.0))
+            hi_c, hi_desc = _calculate_heat_index(air_temp, rh)
+            precip_1h = float(curr.get("precipitation", 0.0))
+            precip_desc = "Rain" if precip_1h > 0 else "No Rain"
+            weather_desc = "Partly Cloudy"
+
+        rh = float(curr.get("relative_humidity_2m", 70.0))
+        ghi = float(curr.get("shortwave_radiation", 0.0))
+        gti = float(curr.get("global_tilted_irradiance", ghi))
+        cloud_cover = float(curr.get("cloud_cover", 0.0))
+        wind_speed = float(curr.get("wind_speed_10m", 0.0))
+        wind_dir = float(curr.get("wind_direction_10m", 0.0))
+        pressure = float(curr.get("pressure_msl", 1010.0))
+
         cell_temp, derating_pct, pv_kw = _compute_pv(gti, air_temp, array_kwp, sys_eff)
 
         now_ph = datetime.now(PH_TZ)
@@ -204,8 +268,19 @@ class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         today_rain_mm = float(d_rain[0]) if d_rain else 0.0
         max_wind_today = float(d_wind[0]) if d_wind else wind_speed
 
-        if max_wind_today >= 62.0 or precip_1h >= 15.0 or today_rain_mm >= 50.0:
-            advisory = "Severe Weather / Typhoon Watch - Charge Battery to 100% Grid Backup"
+        # Evaluate Active DOST-PAGASA Tropical Cyclone / Severe Weather Bulletins
+        active_cyclone = any(
+            "tropical cyclone" in str(a.get("type", "")).lower()
+            or "typhoon" in str(a.get("title", "")).lower()
+            for a in panahon_alerts
+        )
+        active_thunderstorm = any(
+            "thunderstorm advisory" in str(a.get("type", "")).lower()
+            for a in panahon_alerts
+        )
+
+        if active_cyclone or max_wind_today >= 62.0 or precip_1h >= 15.0 or today_rain_mm >= 50.0:
+            advisory = "DOST-PAGASA Storm / Typhoon Watch - Hold 90% Battery Reserve for Grid Outage"
         elif tomorrow_kwh < (array_kwp * 2.2) or today_rain_mm >= 15.0 or cloud_cover >= 85.0:
             advisory = "High Cloud / Monsoon Rain Expected - Hold 50% Battery Reserve"
         elif pv_kw >= (array_kwp * 0.55):
@@ -214,10 +289,20 @@ class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             advisory = "Normal Solar Self-Consumption"
 
         return {
+            "data_source": data_source,
+            "pagasa_barangay": meta.get("barangay", ""),
+            "pagasa_municipality": meta.get("municipality", ""),
+            "pagasa_province": meta.get("province", ""),
+            "pagasa_rain_map_url": panahon_dashboard.get("data", {}).get("rain_map", {}).get("url", ""),
+            "pagasa_public_weather_url": panahon_dashboard.get("data", {}).get("public_weather_forecast", {}).get("url", ""),
             "air_temperature_avg": round(air_temp, 1),
             "relative_humidity_avg": round(rh, 1),
             "heat_index_avg": hi_c,
             "heat_index_description": hi_desc,
+            "weather_description": weather_desc,
+            "rainfall_1h_mm": round(precip_1h, 2),
+            "rainfall_description": precip_desc,
+            "today_rain_mm": round(today_rain_mm, 2),
             "solar_radiation_avg": round(ghi, 1),
             "global_tilted_irradiance": round(gti, 1),
             "pv_cell_temp_c": cell_temp,
@@ -226,13 +311,14 @@ class PanahonSolarDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "estimated_today_pv_kwh": round(today_kwh, 2),
             "estimated_tomorrow_pv_kwh": round(tomorrow_kwh, 2),
             "peak_sun_hours_today": round(today_psh, 2),
-            "rainfall_1h_mm": round(precip_1h, 2),
-            "today_rain_mm": round(today_rain_mm, 2),
             "cloud_cover_pct": round(cloud_cover, 1),
             "wind_speed_kmh": round(wind_speed, 1),
             "wind_direction_deg": round(wind_dir, 0),
             "barometric_pressure_hpa": round(pressure, 1),
             "weather_code": int(curr.get("weather_code", 1)),
             "typhoon_battery_advisory": advisory,
+            "active_cyclone_alert": active_cyclone,
+            "active_thunderstorm_alert": active_thunderstorm,
+            "alerts_count": len(panahon_alerts),
             "daily": daily,
         }

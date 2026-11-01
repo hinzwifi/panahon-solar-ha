@@ -193,8 +193,34 @@ class PanahonSolarSensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         if not self.coordinator.data:
             return {}
+        data = self.coordinator.data
+        attrs: dict[str, Any] = {
+            "data_source": data.get("data_source"),
+        }
+        if data.get("pagasa_barangay"):
+            attrs["pagasa_location"] = f"{data.get('pagasa_barangay')}, {data.get('pagasa_municipality')}, {data.get('pagasa_province')}"
+
         if self.entity_description.key == "heat_index_avg":
-            return {
-                "pagasa_danger_level": self.coordinator.data.get("heat_index_description"),
-            }
-        return {}
+            attrs.update(
+                {
+                    "pagasa_danger_level": data.get("heat_index_description"),
+                    "weather_description": data.get("weather_description"),
+                }
+            )
+        elif self.entity_description.key == "air_temperature_avg":
+            attrs.update(
+                {
+                    "weather_description": data.get("weather_description"),
+                }
+            )
+        elif self.entity_description.key == "typhoon_battery_advisory":
+            attrs.update(
+                {
+                    "active_cyclone_alert": data.get("active_cyclone_alert"),
+                    "active_thunderstorm_alert": data.get("active_thunderstorm_alert"),
+                    "dost_pagasa_alerts_count": data.get("alerts_count"),
+                    "pagasa_rain_map_url": data.get("pagasa_rain_map_url"),
+                    "pagasa_public_weather_url": data.get("pagasa_public_weather_url"),
+                }
+            )
+        return attrs
