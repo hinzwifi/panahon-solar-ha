@@ -1,5 +1,3 @@
-"""Sensor platform for DOST-PAGASA PANaHON & PH Solar Forecast."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,12 +30,22 @@ from .coordinator import PanahonSolarDataUpdateCoordinator
 
 @dataclass(frozen=True)
 class PanahonSensorDescription(SensorEntityDescription):
-    """Describe a PANaHON PH Solar sensor."""
-
     value_key: str = ""
 
 
 SENSORS: tuple[PanahonSensorDescription, ...] = (
+    PanahonSensorDescription(
+        key="resolved_location",
+        name="PANaHON Resolved Location",
+        value_key="resolved_location",
+        icon="mdi:map-marker",
+    ),
+    PanahonSensorDescription(
+        key="weather_description",
+        name="PANaHON Weather Condition",
+        value_key="weather_description",
+        icon="mdi:weather-partly-cloudy",
+    ),
     PanahonSensorDescription(
         key="solar_radiation_avg",
         name="PANaHON Solar Radiation (GHI)",
@@ -82,6 +90,7 @@ SENSORS: tuple[PanahonSensorDescription, ...] = (
         name="PANaHON Peak Sun Hours Today",
         value_key="peak_sun_hours_today",
         native_unit_of_measurement="h",
+        icon="mdi:weather-sunny",
         state_class=SensorStateClass.MEASUREMENT,
     ),
     PanahonSensorDescription(
@@ -97,6 +106,7 @@ SENSORS: tuple[PanahonSensorDescription, ...] = (
         name="PANaHON Tropical Thermal Derating",
         value_key="thermal_derating_pct",
         native_unit_of_measurement=PERCENTAGE,
+        icon="mdi:thermometer-chevron-down",
         state_class=SensorStateClass.MEASUREMENT,
     ),
     PanahonSensorDescription(
@@ -159,18 +169,13 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up PANaHON Solar sensors from config entry."""
     coordinator: PanahonSolarDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         PanahonSolarSensor(coordinator, entry, desc) for desc in SENSORS
     )
 
 
-class PanahonSolarSensor(
-    CoordinatorEntity[PanahonSolarDataUpdateCoordinator], SensorEntity
-):
-    """Representation of a PANaHON PH Solar Sensor."""
-
+class PanahonSolarSensor(CoordinatorEntity[PanahonSolarDataUpdateCoordinator], SensorEntity):
     entity_description: PanahonSensorDescription
 
     def __init__(
@@ -196,37 +201,24 @@ class PanahonSolarSensor(
         data = self.coordinator.data
         attrs: dict[str, Any] = {
             "data_source": data.get("data_source"),
+            "resolved_location": data.get("resolved_location"),
         }
-        if data.get("pagasa_municipality"):
-            loc_parts = [
-                data.get("pagasa_barangay"),
-                data.get("pagasa_municipality"),
-                data.get("pagasa_province"),
-                data.get("pagasa_region"),
-            ]
-            attrs["pagasa_location"] = ", ".join([str(p) for p in loc_parts if p])
 
         if self.entity_description.key == "heat_index_avg":
-            attrs.update(
-                {
-                    "pagasa_danger_level": data.get("heat_index_description"),
-                    "weather_description": data.get("weather_description"),
-                }
-            )
+            attrs.update({
+                "pagasa_danger_level": data.get("heat_index_description"),
+                "weather_description": data.get("weather_description"),
+            })
         elif self.entity_description.key == "air_temperature_avg":
-            attrs.update(
-                {
-                    "weather_description": data.get("weather_description"),
-                }
-            )
+            attrs.update({
+                "weather_description": data.get("weather_description"),
+            })
         elif self.entity_description.key == "typhoon_battery_advisory":
-            attrs.update(
-                {
-                    "active_cyclone_alert": data.get("active_cyclone_alert"),
-                    "active_thunderstorm_alert": data.get("active_thunderstorm_alert"),
-                    "dost_pagasa_alerts_count": data.get("alerts_count"),
-                    "pagasa_rain_map_url": data.get("pagasa_rain_map_url"),
-                    "pagasa_public_weather_url": data.get("pagasa_public_weather_url"),
-                }
-            )
+            attrs.update({
+                "active_cyclone_alert": data.get("active_cyclone_alert"),
+                "active_thunderstorm_alert": data.get("active_thunderstorm_alert"),
+                "dost_pagasa_alerts_count": data.get("alerts_count"),
+                "pagasa_rain_map_url": data.get("pagasa_rain_map_url"),
+                "pagasa_public_weather_url": data.get("pagasa_public_weather_url"),
+            })
         return attrs

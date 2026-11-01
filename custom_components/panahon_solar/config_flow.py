@@ -1,5 +1,3 @@
-"""Config flow for DOST-PAGASA PANaHON & PH Solar Forecast."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -26,8 +24,6 @@ from .const import (
 
 
 class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a step-by-step, reconfigurable flow for PANaHON & PH Solar Forecast."""
-
     VERSION = 1
 
     def __init__(self) -> None:
@@ -38,13 +34,11 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
-        """Get the options flow for this handler."""
         return PanahonSolarOptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 1 (KISS): Essential Location and Solar Array Size."""
         if user_input is not None:
             self._user_input.update(user_input)
             return await self.async_step_advanced()
@@ -66,7 +60,6 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_advanced(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Step 2 (Optional): Roof Orientation and Optional PANaHON App Credentials."""
         if user_input is not None:
             self._user_input.update(user_input)
             return self.async_create_entry(
@@ -87,7 +80,6 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Handle reconfiguring the existing config entry."""
         if hasattr(self, "_get_reconfigure_entry"):
             entry = self._get_reconfigure_entry()
         else:
@@ -98,10 +90,7 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             if hasattr(self, "async_update_reload_and_abort"):
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data_updates=user_input,
-                )
+                return self.async_update_reload_and_abort(entry, data_updates=user_input)
             return self.async_abort(reason="reconfigure_successful")
 
         current = {**entry.data, **entry.options}
@@ -121,12 +110,9 @@ class PanahonSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PanahonSolarOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow for live reconfiguring via Configure button."""
-
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
-        """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
